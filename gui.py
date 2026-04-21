@@ -52,11 +52,12 @@ class EPUBSteelGUI:
         self.root.minsize(1040, 700)
         self.root.configure(bg="#0b1020")
 
-        self.output_path = str(Path.home() / "Downloads" / "epubsteel-book.epub")
+        self.output_path = ""
         self.worker_thread: Optional[threading.Thread] = None
         self.queue: "queue.Queue[tuple[str, object]]" = queue.Queue()
         self.is_running = False
         self.latest_success_path: Optional[str] = None
+        self.has_prompted_for_output = False
 
         self.auth_mode = tk.StringVar(value="none")
         self.follow_links_var = tk.BooleanVar(value=False)
@@ -69,6 +70,7 @@ class EPUBSteelGUI:
         self._setup_styles()
         self._create_layout()
         self._toggle_auth_fields()
+        self.root.after(250, self._prompt_for_initial_output_file)
         self.root.after(120, self._process_queue)
 
     def _setup_styles(self) -> None:
@@ -205,7 +207,6 @@ class EPUBSteelGUI:
         self.title_entry = self._labeled_entry(meta, 0, 0, "Book Title", "Leave blank to auto-use the first page title.")
         self.author_entry = self._labeled_entry(meta, 0, 1, "Author", "Defaults to Unknown if left empty.")
         self.output_entry = self._labeled_entry(parent, 4, 0, "Output EPUB", "Pick where the .epub file should be saved.")
-        self.output_entry.insert(0, self.output_path)
 
         output_actions = ttk.Frame(parent, style="Card.TFrame")
         output_actions.grid(row=5, column=0, sticky="w", pady=(8, 0))
@@ -336,8 +337,25 @@ class EPUBSteelGUI:
             initialfile=initial_name,
         )
         if selected:
+            self.output_path = selected
             self.output_entry.delete(0, tk.END)
             self.output_entry.insert(0, selected)
+            self._set_summary(f"Output file selected: {selected}")
+
+    def _prompt_for_initial_output_file(self) -> None:
+        if self.has_prompted_for_output:
+            return
+
+        self.has_prompted_for_output = True
+        self._set_status("Choose output")
+        self._set_summary("Choose where the EPUB should be saved for this session.")
+        self._choose_output_file()
+
+        if not self.output_entry.get().strip():
+            self._set_status("Ready")
+            self._set_summary("Add URLs, then choose an output EPUB file to begin.")
+        else:
+            self._set_status("Ready")
 
     def _open_output_folder(self) -> None:
         output = self.output_entry.get().strip()
@@ -603,7 +621,8 @@ class EPUBSteelGUI:
         self.title_entry.delete(0, tk.END)
         self.author_entry.delete(0, tk.END)
         self.output_entry.delete(0, tk.END)
-        self.output_entry.insert(0, self.output_path)
+        if self.output_path:
+            self.output_entry.insert(0, self.output_path)
         self.username_entry.delete(0, tk.END)
         self.password_entry.delete(0, tk.END)
         self.token_entry.delete(0, tk.END)
