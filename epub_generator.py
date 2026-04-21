@@ -52,7 +52,7 @@ class EPUBGenerator:
         elif key == 'rights':
             self.book.add_metadata('DC', 'rights', value)
     
-    def add_chapter(self, title: str, content: str) -> None:
+    def add_chapter(self, title: str, content: str, chapter_id: str) -> Optional[epub.EpubHtml]:
         """
         Add a chapter to the book.
         
@@ -61,13 +61,12 @@ class EPUBGenerator:
             content: Chapter HTML content
         """
         try:
-            chapter_id = f'chapter_{len(self.chapters)}'
             chapter_id = str(chapter_id).replace(" ", "_").replace("/", "_")
             if chapter_id in self._used_ids:
-                suffix = 1
-                while f"{chapter_id}_{suffix}" in self._used_ids:
-                    suffix += 1
-                chapter_id = f"{chapter_id}_{suffix}"
+                i = 1
+                while f"{chapter_id}_{i}" in self._used_ids:
+                    i += 1
+                chapter_id = f"{chapter_id}_{i}"
             self._used_ids.add(chapter_id)
 
             chapter = epub.EpubHtml(
@@ -75,26 +74,22 @@ class EPUBGenerator:
                 file_name=f"{chapter_id}.xhtml",
                 lang="en"
             )
+            assert not hasattr(chapter, "set_id"), "Invalid API usage detected"
             chapter.id = chapter_id
-
-            if not chapter.file_name:
-                chapter.file_name = f"{chapter.id}.xhtml"
 
             if not content or not content.strip():
                 content = "<p></p>"
 
-            chapter.content = self._format_content(content)
-
-            self.chapters.append(chapter)
+            chapter.content = content
             self.book.add_item(chapter)
-            if not self.book.spine:
-                self.book.spine = ['nav']
             self.book.spine.append(chapter)
+            self.chapters.append(chapter)
             logger.info(f"Added chapter: {title}")
+            return chapter
         except Exception as e:
             print(f"[EPUB ERROR] Failed to add chapter {title}: {e}")
             logger.error(f"Failed to add chapter '{title}': {e}")
-            return
+            return None
     
     def add_chapter_from_text(self, title: str, text: str) -> None:
         """
@@ -105,7 +100,8 @@ class EPUBGenerator:
             text: Plain text content
         """
         html_content = self._text_to_html(text)
-        self.add_chapter(title, html_content)
+        chapter_id = f'chapter_{len(self.chapters)}'
+        self.add_chapter(title, html_content, chapter_id)
     
     @staticmethod
     def _format_content(content: str) -> str:
