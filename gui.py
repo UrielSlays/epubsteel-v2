@@ -48,8 +48,14 @@ class EPUBSteelGUI:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("EPUBSteel")
-        self.root.geometry("1220x820")
-        self.root.minsize(1060, 720)
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        window_width = min(1220, max(900, screen_width - 80))
+        window_height = min(820, max(680, screen_height - 120))
+        pos_x = max(20, (screen_width - window_width) // 2)
+        pos_y = max(20, (screen_height - window_height) // 2)
+        self.root.geometry(f"{window_width}x{window_height}+{pos_x}+{pos_y}")
+        self.root.minsize(860, 620)
         self.root.resizable(True, True)
         self.root.configure(bg="#0b1020")
 
@@ -168,11 +174,29 @@ class EPUBSteelGUI:
         self.root.columnconfigure(0, weight=1)
         self.root.rowconfigure(0, weight=1)
 
-        outer = ttk.Frame(self.root, style="App.TFrame", padding=22)
-        outer.grid(sticky="nsew")
+        shell = ttk.Frame(self.root, style="App.TFrame")
+        shell.grid(sticky="nsew")
+        shell.columnconfigure(0, weight=1)
+        shell.rowconfigure(0, weight=1)
+
+        self.canvas = tk.Canvas(shell, bg=self.palette["bg"], highlightthickness=0, bd=0)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+
+        scrollbar = ttk.Scrollbar(shell, orient="vertical", command=self.canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.canvas.configure(yscrollcommand=scrollbar.set)
+
+        outer = ttk.Frame(self.canvas, style="App.TFrame", padding=22)
         outer.columnconfigure(0, weight=5)
         outer.columnconfigure(1, weight=3)
         outer.rowconfigure(1, weight=1)
+        self.outer_window = self.canvas.create_window((0, 0), window=outer, anchor="nw")
+
+        outer.bind("<Configure>", self._on_outer_configure)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel)
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel)
 
         header = ttk.Frame(outer, style="App.TFrame")
         header.grid(row=0, column=0, columnspan=2, sticky="ew", pady=(0, 18))
@@ -331,6 +355,20 @@ class EPUBSteelGUI:
         grip = ttk.Sizegrip(footer)
         grip.grid(row=0, column=1, sticky="se")
         grip.configure(cursor="size_nw_se")
+
+    def _on_outer_configure(self, _event) -> None:
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event) -> None:
+        self.canvas.itemconfigure(self.outer_window, width=event.width)
+
+    def _on_mousewheel(self, event) -> None:
+        if event.delta:
+            self.canvas.yview_scroll(int(-event.delta / 120), "units")
+        elif getattr(event, "num", None) == 4:
+            self.canvas.yview_scroll(-1, "units")
+        elif getattr(event, "num", None) == 5:
+            self.canvas.yview_scroll(1, "units")
 
     def _labeled_entry(
         self,
