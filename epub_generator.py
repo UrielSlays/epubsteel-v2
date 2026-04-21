@@ -8,6 +8,7 @@ from typing import List, Dict, Optional
 from datetime import datetime
 from ebooklib import epub
 import os
+print(f"[DEBUG] Using EPUBGenerator from: {__file__}")
 
 logger = logging.getLogger(__name__)
 
