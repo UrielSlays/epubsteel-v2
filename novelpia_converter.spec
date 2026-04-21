@@ -16,8 +16,8 @@ a = Analysis(
         (str(python_base / "DLLs" / "tk86t.dll"), "."),
     ],
     datas=[
-        (str(tcl_root / "tcl8.6"), "tcl/tcl8.6"),
-        (str(tcl_root / "tk8.6"), "tcl/tk8.6"),
+        (str(tcl_root / "tcl8.6"), "_tcl_data"),
+        (str(tcl_root / "tk8.6"), "_tk_data"),
     ],
     hiddenimports=[
         "auth",
@@ -30,9 +30,9 @@ a = Analysis(
         "tkinter",
         "_tkinter",
     ],
-    hookspath=[],
+    hookspath=["pyinstaller_hooks"],
     hooksconfig={},
-    runtime_hooks=["pyi_rth_tkinter.py"],
+    runtime_hooks=[],
     excludes=[],
     noarchive=False,
     optimize=0,
