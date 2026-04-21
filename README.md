@@ -32,13 +32,43 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Desktop GUI
+
+Launch the desktop app:
+
+```bash
+python gui.py
+```
+
+From the GUI you can:
+
+- Paste one or more URLs
+- Set title, author, and output file
+- Choose no auth, basic auth, or bearer token
+- Enable optional link following
+- Watch progress and logs while the EPUB is built
+
 ### Basic Usage
 
 Convert a single webpage to EPUB:
 
 \\\ash
 python main.py -u https://example.com -o book.epub -t "My Book Title"
-\\\
+```
+
+### Build Windows EXE
+
+Build the standalone GUI executable with PyInstaller:
+
+```bash
+pyinstaller --clean --noconfirm Novelpia_EPUB_Converter.spec
+```
+
+The generated file will be:
+
+```text
+dist/EPUBSteel.exe
+```
 
 ### Multiple URLs
 
