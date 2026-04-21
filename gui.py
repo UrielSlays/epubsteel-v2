@@ -779,7 +779,7 @@ class EPUBSteelGUI:
                 p { margin: 0 0 0.9em 0; }
                 """
             )
-            for chapter in chapters:
+            for index, chapter in enumerate(chapters):
                 chapter_content = str(chapter["content"])
                 chapter_images = [str(path) for path in chapter.get("image_paths", [])]
                 chapter_html = EPUBGenerator._text_to_html(chapter_content)
@@ -792,7 +792,7 @@ class EPUBSteelGUI:
                     generator.add_image(image_path, image_filename)
                 if image_tags:
                     chapter_html = chapter_html + "\n" + "\n".join(image_tags)
-                generator.add_chapter(str(chapter["title"]), chapter_html)
+                generator.add_chapter(str(chapter["title"]), chapter_html, f"chapter_{index}")
             if not generator.save(export_path):
                 raise RuntimeError(f"Failed to save {export_format.upper()} export for {book_title}.")
 
