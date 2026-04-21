@@ -145,6 +145,23 @@ class EPUBGenerator:
             logger.info(f"Added cover image: {image_name}")
         except Exception as e:
             logger.error(f"Failed to add cover image: {e}")
+
+    def add_image(self, image_path: str, image_name: Optional[str] = None) -> None:
+        """Add a chapter image asset to the EPUB if the file exists."""
+        if not os.path.exists(image_path):
+            return
+
+        try:
+            with open(image_path, 'rb') as img_file:
+                image_data = img_file.read()
+
+            filename = image_name or os.path.basename(image_path)
+            item = epub.EpubImage()
+            item.set_filename(f'images/{filename}')
+            item.set_content(image_data)
+            self.book.add_item(item)
+        except Exception as e:
+            logger.error(f"Failed to add chapter image {image_path}: {e}")
     
     def add_css(self, css_content: str) -> None:
         """
