@@ -27,12 +27,13 @@ class EPUBGenerator:
         self.author = author
         self.book = epub.EpubBook()
         self.chapters: List[epub.EpubHtml] = []
+        self._used_ids = set()
         self._setup_book()
     
     def _setup_book(self) -> None:
         """Set up basic book properties."""
         self.book.set_identifier(f'epubsteel_{datetime.now().timestamp()}')
-        self.book.set_title(self.title)
+        self.book.title = self.title
         self.book.add_author(self.author)
         self.book.set_language('en')
     
@@ -59,14 +60,41 @@ class EPUBGenerator:
             title: Chapter title
             content: Chapter HTML content
         """
-        chapter = epub.EpubHtml()
-        chapter.set_id(f'chapter_{len(self.chapters)}')
-        chapter.set_title(title)
-        chapter.content = self._format_content(content)
-        
-        self.chapters.append(chapter)
-        self.book.add_item(chapter)
-        logger.info(f"Added chapter: {title}")
+        try:
+            chapter_id = f'chapter_{len(self.chapters)}'
+            chapter_id = str(chapter_id).replace(" ", "_").replace("/", "_")
+            if chapter_id in self._used_ids:
+                suffix = 1
+                while f"{chapter_id}_{suffix}" in self._used_ids:
+                    suffix += 1
+                chapter_id = f"{chapter_id}_{suffix}"
+            self._used_ids.add(chapter_id)
+
+            chapter = epub.EpubHtml(
+                title=title,
+                file_name=f"{chapter_id}.xhtml",
+                lang="en"
+            )
+            chapter.id = chapter_id
+
+            if not chapter.file_name:
+                chapter.file_name = f"{chapter.id}.xhtml"
+
+            if not content or not content.strip():
+                content = "<p></p>"
+
+            chapter.content = self._format_content(content)
+
+            self.chapters.append(chapter)
+            self.book.add_item(chapter)
+            if not self.book.spine:
+                self.book.spine = ['nav']
+            self.book.spine.append(chapter)
+            logger.info(f"Added chapter: {title}")
+        except Exception as e:
+            print(f"[EPUB ERROR] Failed to add chapter {title}: {e}")
+            logger.error(f"Failed to add chapter '{title}': {e}")
+            return
     
     def add_chapter_from_text(self, title: str, text: str) -> None:
         """
