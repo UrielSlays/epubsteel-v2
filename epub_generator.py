@@ -69,16 +69,13 @@ class EPUBGenerator:
                 chapter_id = f"{chapter_id}_{i}"
             self._used_ids.add(chapter_id)
 
-            chapter = epub.EpubHtml(
-                title=title,
-                file_name=f"{chapter_id}.xhtml",
-                lang="en"
-            )
-            # ebooklib versions differ: some expose set_id(), others only id.
-            if hasattr(chapter, "set_id"):
-                chapter.set_id(chapter_id)
-            else:
-                chapter.id = chapter_id
+          chapter = epub.EpubHtml(
+              uid=chapter_id,  # Use uid parameter instead of set_id()
+    title=title,
+    file_name=f"{chapter_id}.xhtml",
+    lang="en"
+)
+chapter.content = content
 
             if not content or not content.strip():
                 content = "<p></p>"
