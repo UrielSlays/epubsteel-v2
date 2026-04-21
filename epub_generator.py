@@ -153,10 +153,12 @@ class EPUBGenerator:
         Args:
             css_content: CSS content
         """
-        style = epub.EpubItem()
-        style.set_id('style_default')
-        style.set_filename('style/default.css')
-        style.set_content(css_content)
+        style = epub.EpubItem(
+            uid='style_default',
+            file_name='style/default.css',
+            media_type='text/css',
+            content=css_content.encode('utf-8'),
+        )
         
         self.book.add_item(style)
         logger.info("Added CSS stylesheet")

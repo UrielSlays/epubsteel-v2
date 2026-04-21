@@ -13,9 +13,11 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 from typing import Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 from auth import create_default_auth_handler
 from epub_generator import EPUBGenerator
+from long_image_generator import LongImageGenerator
 from pdf_generator import PDFGenerator
 from scraper import WebScraper
 
@@ -257,7 +259,7 @@ class EPUBSteelGUI:
         format_group.columnconfigure(0, weight=1)
         ttk.Label(format_group, text="Export Format", style="Section.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(format_group, text="Choose the format generated after the chapter download finishes.", style="Body.TLabel").grid(row=1, column=0, sticky="w", pady=(3, 6))
-        self.format_combo = ttk.Combobox(format_group, state="readonly", textvariable=self.format_var, values=["epub", "pdf"])
+        self.format_combo = ttk.Combobox(format_group, state="readonly", textvariable=self.format_var, values=["epub", "pdf", "long-image"])
         self.format_combo.grid(row=2, column=0, sticky="ew")
 
         session = ttk.Frame(parent, style="SoftCard.TFrame", padding=14)
@@ -614,10 +616,11 @@ class EPUBSteelGUI:
         current_url = start_url
         chapter_index = 0
         seen_urls = set()
-        collected: List[Dict[str, str]] = []
+        collected: List[Dict[str, object]] = []
         book_folder = ""
         chapters_folder = ""
         resolved_book_title = ""
+        all_image_paths: List[str] = []
 
         while current_url and not self.stop_event.is_set():
             if current_url in seen_urls:
@@ -627,12 +630,16 @@ class EPUBSteelGUI:
             seen_urls.add(current_url)
             chapter = scraper.scrape_chapter(current_url)
             if not chapter:
+                if collected:
+                    self._queue_log(f"Stopping this book because the next chapter could not be downloaded: {current_url}")
+                    break
                 raise RuntimeError(f"Failed to download chapter URL: {current_url}")
 
             chapter_index += 1
             chapter_title = str(chapter.get("title") or f"Chapter {chapter_index}")
             chapter_content = str(chapter.get("content") or "").strip()
-            if not chapter_content:
+            chapter_images = [str(url) for url in chapter.get("images", []) if str(url).strip()]
+            if not chapter_content and not chapter_images:
                 raise RuntimeError(f"No chapter content found at: {current_url}")
 
             if not resolved_book_title:
@@ -642,28 +649,76 @@ class EPUBSteelGUI:
                 os.makedirs(chapters_folder, exist_ok=True)
                 self._queue_log(f"Book folder created: {book_folder}")
 
-            chapter_filename = f"{chapter_index:04d} - {sanitize_filename(chapter_title, f'chapter-{chapter_index:04d}')}.txt"
-            chapter_path = os.path.join(chapters_folder, chapter_filename)
-            with open(chapter_path, "w", encoding="utf-8") as file_handle:
-                file_handle.write(chapter_title + "\n\n")
-                file_handle.write(chapter_content + "\n")
-                file_handle.write(f"\nSource URL: {current_url}\n")
+            chapter_filename = f"{chapter_index:04d} - {sanitize_filename(chapter_title, f'chapter-{chapter_index:04d}')}"
+            if chapter_content:
+                chapter_path = os.path.join(chapters_folder, f"{chapter_filename}.txt")
+                with open(chapter_path, "w", encoding="utf-8") as file_handle:
+                    file_handle.write(chapter_title + "\n\n")
+                    file_handle.write(chapter_content + "\n")
+                    file_handle.write(f"\nSource URL: {current_url}\n")
 
-            collected.append({"title": chapter_title, "content": chapter_content, "url": current_url})
+            downloaded_image_paths = self._save_chapter_images(scraper, chapters_folder, chapter_filename, chapter_images)
+            all_image_paths.extend(downloaded_image_paths)
+
+            collected.append(
+                {
+                    "title": chapter_title,
+                    "content": chapter_content,
+                    "url": current_url,
+                    "image_paths": downloaded_image_paths,
+                }
+            )
             self.downloaded_chapters += 1
             self._set_metric("chapters", str(self.downloaded_chapters))
             self._set_summary(f"{resolved_book_title}: saved chapter {chapter_index}")
-            self._queue_log(f"Saved chapter {chapter_index:04d}: {chapter_title}")
+            if downloaded_image_paths:
+                self._queue_log(f"Saved chapter {chapter_index:04d}: {chapter_title} with {len(downloaded_image_paths)} image(s)")
+            else:
+                self._queue_log(f"Saved chapter {chapter_index:04d}: {chapter_title}")
             self._set_progress(min(95, 5 + (self.downloaded_chapters * 3)))
 
             next_url = str(chapter.get("next_url") or "").strip()
             if not next_url:
                 self._queue_log("No next chapter link found. This book is complete.")
                 break
+            if not scraper.is_probable_chapter_url(current_url, next_url):
+                self._queue_log(f"Stopping this book because the detected next link does not look like another chapter: {next_url}")
+                break
             current_url = next_url
 
         if collected and not self.stop_event.is_set():
-            self._export_book(book_folder, resolved_book_title, author, export_format, collected)
+            self._export_book(book_folder, resolved_book_title, author, export_format, collected, all_image_paths)
+
+    def _save_chapter_images(
+        self,
+        scraper: WebScraper,
+        chapters_folder: str,
+        chapter_filename: str,
+        image_urls: List[str],
+    ) -> List[str]:
+        if not image_urls:
+            return []
+
+        image_folder = os.path.join(chapters_folder, chapter_filename)
+        os.makedirs(image_folder, exist_ok=True)
+        saved_paths: List[str] = []
+
+        for image_index, image_url in enumerate(image_urls, start=1):
+            binary = scraper.fetch_binary(image_url)
+            if not binary:
+                continue
+
+            parsed_path = Path(urlparse(image_url).path)
+            extension = parsed_path.suffix.lower()
+            if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
+                extension = ".jpg"
+
+            image_path = os.path.join(image_folder, f"{image_index:03d}{extension}")
+            with open(image_path, "wb") as file_handle:
+                file_handle.write(binary)
+            saved_paths.append(image_path)
+
+        return saved_paths
 
     def _prepare_book_folder(self, book_title: str) -> str:
         folder_name = sanitize_filename(book_title, "untitled-book")
@@ -681,15 +736,21 @@ class EPUBSteelGUI:
         book_title: str,
         author: str,
         export_format: str,
-        chapters: List[Dict[str, str]],
+        chapters: List[Dict[str, object]],
+        all_image_paths: List[str],
     ) -> None:
         self._queue_log(f"Converting {book_title} to {export_format.upper()}...")
-        export_path = os.path.join(book_folder, f"{sanitize_filename(book_title)}.{export_format}")
+        extension = "png" if export_format == "long-image" else export_format
+        export_path = os.path.join(book_folder, f"{sanitize_filename(book_title)}.{extension}")
 
-        if export_format == "pdf":
+        if export_format == "long-image":
+            generator = LongImageGenerator()
+            if not generator.save(export_path, all_image_paths):
+                raise RuntimeError(f"Failed to save LONG IMAGE export for {book_title}.")
+        elif export_format == "pdf":
             generator = PDFGenerator(title=book_title, author=author)
             for chapter in chapters:
-                generator.add_chapter(chapter["title"], chapter["content"])
+                generator.add_chapter(str(chapter["title"]), str(chapter["content"]))
             generator.save(export_path)
         else:
             generator = EPUBGenerator(title=book_title, author=author)
@@ -701,7 +762,7 @@ class EPUBSteelGUI:
                 """
             )
             for chapter in chapters:
-                generator.add_chapter_from_text(chapter["title"], chapter["content"])
+                generator.add_chapter_from_text(str(chapter["title"]), str(chapter["content"]))
             if not generator.save(export_path):
                 raise RuntimeError(f"Failed to save {export_format.upper()} export for {book_title}.")
 

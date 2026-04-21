@@ -42,6 +42,22 @@ class WebScraper:
             logger.error(f"Failed to fetch {url}: {exc}")
             return None
 
+    def fetch_binary(self, url: str) -> Optional[bytes]:
+        """Fetch a binary asset such as a chapter image."""
+        try:
+            logger.info(f"Fetching binary: {url}")
+            response = self.session.get(
+                url,
+                headers=self.auth.get_headers(),
+                auth=self.auth.get_auth(),
+                timeout=self.timeout,
+            )
+            response.raise_for_status()
+            return response.content
+        except requests.RequestException as exc:
+            logger.error(f"Failed to fetch binary {url}: {exc}")
+            return None
+
     def parse_html(self, html_content: str) -> BeautifulSoup:
         """Parse HTML content into BeautifulSoup object."""
         return BeautifulSoup(html_content, "html.parser")
@@ -104,8 +120,14 @@ class WebScraper:
         """Extract all image URLs from page."""
         images = []
         for img in soup.find_all("img", src=True):
-            images.append(urljoin(base_url, img["src"]))
-        return images
+            src = img["src"].strip()
+            if not src or src.startswith("data:"):
+                continue
+            image_url = urljoin(base_url, src)
+            if self._is_blocked_image_url(image_url):
+                continue
+            images.append(image_url)
+        return list(dict.fromkeys(images))
 
     def extract_next_link(self, soup: BeautifulSoup, base_url: str, current_url: str) -> Optional[str]:
         """Find the most likely next-chapter link on a page."""
@@ -131,6 +153,8 @@ class WebScraper:
         for anchor in soup.find_all("a", href=True):
             candidate_url = urljoin(base_url, anchor["href"])
             if candidate_url == current_url or not self._same_domain(base_url, candidate_url):
+                continue
+            if self._is_blocked_navigation_url(candidate_url):
                 continue
 
             score = self._score_next_candidate(anchor, current_url, candidate_url, keywords)
@@ -185,6 +209,91 @@ class WebScraper:
         """Extract numeric URL tokens for simple chapter sequencing heuristics."""
         return [int(token) for token in re.findall(r"\d+", url)]
 
+    @staticmethod
+    def _path_tokens(url: str) -> List[str]:
+        """Extract lowercase path tokens from a URL."""
+        return [token for token in re.split(r"[^a-z0-9]+", urlparse(url).path.lower()) if token]
+
+    def _is_blocked_navigation_url(self, candidate_url: str) -> bool:
+        """Reject obvious non-chapter navigation targets."""
+        blocked_tokens = {
+            "home",
+            "index",
+            "login",
+            "register",
+            "bookmark",
+            "bookmarks",
+            "comments",
+            "comment",
+            "reviews",
+            "review",
+            "characters",
+            "character",
+            "gallery",
+            "news",
+            "forum",
+            "search",
+            "list",
+        }
+        tokens = set(self._path_tokens(candidate_url))
+        return bool(tokens & blocked_tokens)
+
+    def _is_blocked_image_url(self, image_url: str) -> bool:
+        """Reject tracking pixels, placeholders, and obvious non-content images."""
+        parsed = urlparse(image_url)
+        host = parsed.netloc.lower()
+        path = parsed.path.lower()
+
+        blocked_hosts = {
+            "www.facebook.com",
+            "facebook.com",
+            "connect.facebook.net",
+            "google-analytics.com",
+            "www.google-analytics.com",
+        }
+        if host in blocked_hosts:
+            return True
+
+        blocked_fragments = (
+            "pixel",
+            "tracker",
+            "tracking",
+            "spacer",
+            "blank",
+            "placeholder",
+            "no_data",
+            "no-data",
+            "default-cover",
+            "main_no_data",
+        )
+        return any(fragment in path for fragment in blocked_fragments)
+
+    def is_probable_chapter_url(self, current_url: str, candidate_url: str) -> bool:
+        """Check whether a candidate URL still looks like a chapter URL."""
+        if not candidate_url or not self._same_domain(current_url, candidate_url):
+            return False
+        if self._is_blocked_navigation_url(candidate_url):
+            return False
+
+        current_tokens = self._path_tokens(current_url)
+        candidate_tokens = self._path_tokens(candidate_url)
+        chapter_markers = {"chapter", "chap", "ch", "episode", "ep", "part"}
+
+        current_has_marker = any(token in chapter_markers for token in current_tokens)
+        candidate_has_marker = any(token in chapter_markers for token in candidate_tokens)
+        if current_has_marker and not candidate_has_marker:
+            return False
+
+        current_numbers = self._numeric_tokens(current_url)
+        candidate_numbers = self._numeric_tokens(candidate_url)
+        if current_numbers and candidate_numbers:
+            for current_num, candidate_num in zip(current_numbers, candidate_numbers):
+                if candidate_num > current_num:
+                    return True
+
+        shared_tokens = sum(1 for token in candidate_tokens if token in current_tokens)
+        return shared_tokens >= max(2, len(current_tokens) // 2)
+
     def _score_next_candidate(
         self,
         anchor,
@@ -216,17 +325,35 @@ class WebScraper:
             if keyword in text:
                 score += 100 if len(keyword) > 1 else 30
 
+        current_tokens = self._path_tokens(current_url)
+        candidate_tokens = self._path_tokens(candidate_url)
+        chapter_markers = {"chapter", "chap", "ch", "episode", "ep", "part"}
+        current_has_marker = any(token in chapter_markers for token in current_tokens)
+        candidate_has_marker = any(token in chapter_markers for token in candidate_tokens)
+
+        if candidate_has_marker:
+            score += 80
+        if current_has_marker and candidate_has_marker:
+            score += 40
+        if current_has_marker and not candidate_has_marker:
+            score -= 160
+
+        shared_tokens = sum(1 for token in candidate_tokens if token in current_tokens)
+        score += min(50, shared_tokens * 10)
+
         current_numbers = self._numeric_tokens(current_url)
         candidate_numbers = self._numeric_tokens(candidate_url)
         if current_numbers and candidate_numbers:
             for current_num, candidate_num in zip(current_numbers, candidate_numbers):
                 difference = candidate_num - current_num
                 if difference == 1:
-                    score += 90
+                    score += 140
                     break
                 if 1 < difference <= 3:
                     score += 35
                     break
+                if difference <= 0:
+                    score -= 40
 
         if urlparse(current_url).path != urlparse(candidate_url).path:
             score += 10
