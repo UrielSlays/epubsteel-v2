@@ -702,21 +702,38 @@ class EPUBSteelGUI:
         image_folder = os.path.join(chapters_folder, chapter_filename)
         os.makedirs(image_folder, exist_ok=True)
         saved_paths: List[str] = []
+        missing_images: List[str] = []
 
         for image_index, image_url in enumerate(image_urls, start=1):
             binary = scraper.fetch_binary(image_url)
-            if not binary:
-                continue
-
             parsed_path = Path(urlparse(image_url).path)
             extension = parsed_path.suffix.lower()
             if extension not in {".jpg", ".jpeg", ".png", ".webp"}:
                 extension = ".jpg"
+            source_name = sanitize_filename(parsed_path.name, f"image-{image_index:03d}{extension}")
+
+            if not binary:
+                missing_images.append(f"{image_index:03d} | {source_name} | {image_url}")
+                placeholder_path = os.path.join(image_folder, f"{image_index:03d} - MISSING - {source_name}.txt")
+                with open(placeholder_path, "w", encoding="utf-8") as placeholder_file:
+                    placeholder_file.write("Image download failed.\n")
+                    placeholder_file.write(f"Original file name: {source_name}\n")
+                    placeholder_file.write(f"Original URL: {image_url}\n")
+                continue
 
             image_path = os.path.join(image_folder, f"{image_index:03d}{extension}")
             with open(image_path, "wb") as file_handle:
                 file_handle.write(binary)
             saved_paths.append(image_path)
+
+        if missing_images:
+            missing_report_path = os.path.join(image_folder, "_missing_images.txt")
+            with open(missing_report_path, "w", encoding="utf-8") as missing_report:
+                missing_report.write("The following chapter images failed to download.\n")
+                missing_report.write("Use the original URL to retrieve them manually.\n\n")
+                for line in missing_images:
+                    missing_report.write(line + "\n")
+            self._queue_log(f"Some chapter images failed and placeholders were saved in: {image_folder}")
 
         return saved_paths
 
@@ -746,7 +763,11 @@ class EPUBSteelGUI:
         if export_format == "long-image":
             generator = LongImageGenerator()
             if not generator.save(export_path, all_image_paths):
-                raise RuntimeError(f"Failed to save LONG IMAGE export for {book_title}.")
+                notes_path = os.path.join(book_folder, "long-image-missing-assets.txt")
+                with open(notes_path, "w", encoding="utf-8") as notes_file:
+                    notes_file.write("LONG IMAGE export could not be generated because no downloaded image files were available.\n")
+                    notes_file.write("Check chapter folders for placeholder files named '* - MISSING - *.txt'.\n")
+                self._queue_log(f"Skipped LONG IMAGE export for {book_title}: no downloaded images were available.")
         elif export_format == "pdf":
             generator = PDFGenerator(title=book_title, author=author)
             for chapter in chapters:
