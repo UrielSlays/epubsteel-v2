@@ -8,7 +8,6 @@ from typing import List, Dict, Optional
 from datetime import datetime
 from ebooklib import epub
 import os
-print(f"[DEBUG] Using EPUBGenerator from: {__file__}")
 
 logger = logging.getLogger(__name__)
 
@@ -75,8 +74,11 @@ class EPUBGenerator:
                 file_name=f"{chapter_id}.xhtml",
                 lang="en"
             )
-            assert not hasattr(chapter, "set_id"), "Invalid API usage detected"
-            chapter.id = chapter_id
+            # ebooklib versions differ: some expose set_id(), others only id.
+            if hasattr(chapter, "set_id"):
+                chapter.set_id(chapter_id)
+            else:
+                chapter.id = chapter_id
 
             if not content or not content.strip():
                 content = "<p></p>"
